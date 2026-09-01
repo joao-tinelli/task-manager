@@ -13,9 +13,8 @@ public class InfoController {
     @GetMapping("/info")
     public Map<String, String> getInfo() {
         return Map.of(
-            "name", "Task Manager REST API",
-            "version", "1.0.0",
-            "description", "Initial setup for Task Manager application"
-        );
+                "name", "Task Manager REST API",
+                "version", "1.0.0",
+                "description", "Initial setup for Task Manager application");
     }
 }
