@@ -8,13 +8,14 @@ function App() {
   const [error, setError] = useState(null)
   const [successMsg, setSuccessMsg] = useState(null)
   const [editingTask, setEditingTask] = useState(null)
+  const [appInfo, setAppInfo] = useState(null)
 
-  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080/api/tasks'
+  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080/api'
 
   const fetchTasks = async () => {
     try {
       setLoading(true)
-      const res = await fetch(API_URL)
+      const res = await fetch(`${API_URL}/tasks`)
       if (!res.ok) throw new Error('Failed to fetch tasks')
       const data = await res.json()
       setTasks(data)
@@ -26,7 +27,20 @@ function App() {
     }
   }
 
+  const fetchInfo = async () => {
+    try {
+      const res = await fetch(`${API_URL}/info`)
+      if (res.ok) {
+        const data = await res.json()
+        setAppInfo(data)
+      }
+    } catch (err) {
+      console.error('Failed to fetch app info:', err)
+    }
+  }
+
   useEffect(() => {
+    fetchInfo()
     fetchTasks()
   }, [])
 
@@ -37,7 +51,7 @@ function App() {
 
   const handleCreateTask = async (taskData) => {
     try {
-      const res = await fetch(API_URL, {
+      const res = await fetch(`${API_URL}/tasks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(taskData)
@@ -52,7 +66,7 @@ function App() {
 
   const handleUpdateTask = async (id, taskData) => {
     try {
-      const res = await fetch(`${API_URL}/${id}`, {
+      const res = await fetch(`${API_URL}/tasks/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(taskData)
@@ -69,7 +83,7 @@ function App() {
   const handleDeleteTask = async (id) => {
     if (!confirm('Are you sure you want to delete this task?')) return
     try {
-      const res = await fetch(`${API_URL}/${id}`, { method: 'DELETE' })
+      const res = await fetch(`${API_URL}/tasks/${id}`, { method: 'DELETE' })
       if (!res.ok) throw new Error('Failed to delete task')
       await fetchTasks()
       showSuccess('Task deleted successfully!')
@@ -80,7 +94,7 @@ function App() {
 
   const handleStatusChange = async (id, newStatus) => {
     try {
-      const res = await fetch(`${API_URL}/${id}/status`, {
+      const res = await fetch(`${API_URL}/tasks/${id}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus })
@@ -95,6 +109,13 @@ function App() {
 
   return (
     <div className="app-container">
+      {appInfo && (
+        <div className="app-info">
+          <span><strong>App:</strong> {appInfo.name}</span>
+          <span><strong>Host:</strong> {appInfo.hostname}</span>
+        </div>
+      )}
+
       <h1>Task Manager</h1>
       
       {error && <div className="error-msg">{error}</div>}
