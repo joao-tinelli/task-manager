@@ -1,0 +1,22 @@
+# Ignorar pastas de sistema de controle de versão
+.git
+.gitignore
+
+# Ignorar pastas do IDE
+.idea
+.vscode
+*.iml
+*.iws
+*.ipr
+.classpath
+.project
+.settings
+
+# Ignorar a pasta de build local
+target/
+build/
+.mvn/wrapper/maven-wrapper.jar
+
+# Ignorar variáveis de ambiente locais
+.env
+.env.*
