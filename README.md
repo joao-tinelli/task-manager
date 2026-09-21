@@ -16,10 +16,11 @@ A aplicação foi preparada de acordo com os princípios de aplicações Cloud N
 - Não há dependência fixa de `localhost` para acesso a recursos externos como o banco de dados. No Kubernetes, os nomes dos *Services* (ex: `postgres`) são injetados diretamente em `DB_HOST`.
 
 ### 2. Health Checks e Kubernetes Probes (Liveness & Readiness)
-O Spring Boot Actuator está configurado com probes ativas para o ciclo de vida do Kubernetes:
-- **Liveness Probe** (`/actuator/health/liveness`): Indica se o processo da aplicação está vivo. Se falhar (ex: deadlock), o Kubernetes reinicia o Pod.
-- **Readiness Probe** (`/actuator/health/readiness`): Indica se a aplicação está pronta para receber requisições (ex: banco de dados acessível e inicialização concluída). Se falhar ou estiver iniciando, o Kubernetes temporariamente retira o Pod do balanceamento de carga do *Service*.
-- **General Health** (`/actuator/health`): Status global da aplicação e de suas dependências.
+O Spring Boot Actuator expõe o endpoint de saúde `/actuator/health` configurado tanto para a **Liveness Probe** quanto para a **Readiness Probe**:
+- **Liveness Probe** (`/actuator/health`): Verifica se o processo da JVM e a aplicação estão vivos. Caso ocorra uma falha irreversível (como deadlock), o Kubernetes reinicia o Pod.
+- **Readiness Probe** (`/actuator/health`): Verifica se a aplicação concluiu a inicialização e se todas as dependências críticas (como o banco de dados PostgreSQL) estão operacionais para receber tráfego do *Service*. Caso contrário, o Pod é temporariamente retirado do balanceamento.
+- **Grupos do Actuator**: As sub-rotas `/actuator/health/liveness` e `/actuator/health/readiness` também permanecem ativas internamente no Actuator.
+
 
 ### 3. Aplicação Stateless e Identificação de Instância (Hostname/Pod)
 - O backend é estritamente **stateless** — nenhum estado de sessão ou dados voláteis são mantidos na memória ou no disco local do container. Isso viabiliza escalabilidade horizontal transparente (múltiplas réplicas/Pods em um `Deployment`).
@@ -82,6 +83,56 @@ No Kubernetes, recursos de configuração, segurança e armazenamento são desac
 | `CORS_ALLOWED_ORIGINS` | `ConfigMap` | `*` | Origens permitidas para requisições CORS |
 | `SHUTDOWN_TIMEOUT` | `ConfigMap` | `30s` | Tempo limite para encerramento gracioso (*graceful shutdown*) |
 | `VITE_API_URL` | Container Env | `http://localhost:8080/api` | URL base da API REST consumida pelo frontend |
+
+---
+
+## 🩺 Health Checks (Probes) e Gerenciamento de Recursos (Requests & Limits)
+
+Os Deployments do projeto foram configurados com práticas essenciais de confiabilidade e dimensionamento para orquestração em Kubernetes:
+
+### 1. Diferença entre Liveness Probe e Readiness Probe
+
+| Característica | Liveness Probe (`livenessProbe`) | Readiness Probe (`readinessProbe`) |
+| :--- | :--- | :--- |
+| **Pergunta que responde** | *"A aplicação está viva e saudável internamente?"* | *"A aplicação está pronta para receber requisições de rede agora?"* |
+| **Ação do Kubernetes em caso de falha** | O `kubelet` encerra o container e dispara uma **reinicialização** (restart) do Pod, respeitando a `restartPolicy`. | O Kubernetes **não reinicia** o container; ele temporariamente **remove o Pod dos endpoints do Service**, impedindo que tráfego de usuários seja enviado até a recuperação. |
+| **Cenário de Uso Ideal** | Recuperar o sistema de travamentos irreversíveis sem restart, como deadlocks de threads, travamento da JVM ou estados corrompidos. | Aquecimento da JVM, inicialização do Spring Boot, conexões com banco de dados e caches, ou sobrecargas transitórias. |
+| **Endpoint / Verificação no Backend** | HTTP GET `/actuator/health` (Porta 8080) | HTTP GET `/actuator/health` (Porta 8080) |
+
+> ⚠️ **Por que nunca usar apenas Liveness Probe?**
+> Se utilizássemos apenas a liveness probe sem readiness probe, o Service começaria a enviar tráfego de usuários para a aplicação assim que o container fosse criado no Docker/containerd. Como o Spring Boot e a conexão JPA com o PostgreSQL levam alguns segundos para inicializar por completo, os usuários receberiam erros de conexão recusada ou HTTP 502/503. Além disso, se a liveness probe fosse muito agressiva durante o startup, o Kubernetes reiniciaria o container prematuramente, gerando o ciclo vicioso de `CrashLoopBackOff`.
+
+---
+
+### 2. Diferença entre Requests e Limits (`resources.requests` vs `resources.limits`)
+
+| Conceito | Requests (`resources.requests`) | Limits (`resources.limits`) |
+| :--- | :--- | :--- |
+| **Definição** | Quantidade **mínima garantida** de CPU e Memória que o Pod precisa para operar com estabilidade. | Teto **máximo permitido** de CPU e Memória que o container pode consumir no Nó. |
+| **Papel no Agendamento (`kube-scheduler`)** | Critério primordial do escalonador. O Pod só é agendado em um Nó que possua capacidade disponível suficiente para atender a soma dos requests. | Não é utilizado para a decisão de agendamento do Pod nos nós. |
+| **Comportamento quando ultrapassado** | N/A (o Pod pode consumir acima do request caso o nó tenha recursos ociosos disponíveis). | • **CPU (recurso compressível):** O kernel do Linux aplica *throttling* (redução de ciclos de CPU via CFS Quotas). O processo desacelera, mas não é abortado.<br>• **Memória (recurso incompressível):** O kernel do Linux invoca o **OOM Killer** e encerra o container com código 137 (`OOMKilled`). |
+
+---
+
+### 3. Por que essas Configurações são Fundamentais no Kubernetes?
+
+1. **Prevenção do Efeito "Noisy Neighbor" (Vizinho Barulhento):** Sem limites, um container com loop infinito ou vazamento de memória pode consumir toda a CPU e RAM do host, prejudicando aplicações vizinhas e até componentes essenciais do próprio nó (`kubelet`, `containerd`).
+2. **Qualidade de Serviço (QoS Class):** O Kubernetes classifica automaticamente cada Pod em uma classe de QoS (`Guaranteed`, `Burstable` ou `BestEffort`). Pods sem limites nem requests são considerados `BestEffort` e são os primeiros a serem desalojados (*evicted*) em situações de estresse de memória do nó. Com `requests` e `limits` definidos de forma balanceada, nossos Pods se enquadram na classe **`Burstable`**, garantindo previsibilidade e prioridade de retenção.
+3. **Deploys sem Indisponibilidade (*Zero-Downtime Rolling Updates*):** Com a readiness probe ativa, ao realizar uma atualização de versão, o Kubernetes só finaliza os Pods antigos após os novos Pods passarem com sucesso pelo teste de prontidão.
+4. **Alocação Eficiente e Previsibilidade de Custos:** Permite ao cluster fazer *bin packing* ótimo, empacotando o máximo de workloads com segurança em cada nó sem superalocação perigosa.
+5. **Base Obrigatória para Autoescalabilidade Futura (HPA):** O Horizontal Pod Autoscaler depende diretamente da definição de `requests.cpu` para computar percentuais de utilização média do cluster e tomar decisões de escalonamento.
+
+---
+
+### 4. Valores Configurados nos Deployments
+
+Para manter compatibilidade e leveza didática em clusters locais (Minikube, Kind ou Docker Desktop), foram escolhidos valores modestos e seguros:
+
+| Componente | Requests (CPU / Memória) | Limits (CPU / Memória) | Liveness Probe | Readiness Probe |
+| :--- | :--- | :--- | :--- | :--- |
+| **Backend** (`backend`) | `100m` / `256Mi` | `500m` / `512Mi` | HTTP GET `/actuator/health` (Porta 8080)<br>• delay: 30s • period: 10s • threshold: 3 | HTTP GET `/actuator/health` (Porta 8080)<br>• delay: 15s • period: 5s • threshold: 3 |
+| **Frontend** (`frontend`) | `50m` / `32Mi` | `200m` / `128Mi` | HTTP GET `/` (Porta 80)<br>• delay: 5s • period: 10s | HTTP GET `/` (Porta 80)<br>• delay: 3s • period: 5s |
+| **PostgreSQL** (`postgres`) | `100m` / `128Mi` | `500m` / `512Mi` | Exec `pg_isready` (Porta 5432)<br>• delay: 15s • period: 10s | Exec `pg_isready` (Porta 5432)<br>• delay: 5s • period: 5s |
 
 ---
 
