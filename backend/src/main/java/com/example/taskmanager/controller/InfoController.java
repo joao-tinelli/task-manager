@@ -11,16 +11,18 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api")
-@CrossOrigin(origins = "${CORS_ALLOWED_ORIGINS:http://localhost:5173}")
+@CrossOrigin(origins = "${cors.allowed-origins:${CORS_ALLOWED_ORIGINS:http://localhost:5173}}")
 public class InfoController {
 
     @GetMapping("/info")
     public Map<String, String> getInfo() {
-        String hostname = "unknown";
-        try {
-            hostname = InetAddress.getLocalHost().getHostName();
-        } catch (UnknownHostException e) {
-            // ignore
+        String hostname = System.getenv("HOSTNAME");
+        if (hostname == null || hostname.isBlank()) {
+            try {
+                hostname = InetAddress.getLocalHost().getHostName();
+            } catch (UnknownHostException e) {
+                hostname = "unknown";
+            }
         }
         return Map.of(
                 "name", "Task Manager REST API",
