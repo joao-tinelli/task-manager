@@ -8,6 +8,18 @@ metadata:
     app.kubernetes.io/part-of: taskmanager-app
 spec:
   replicas: 1
+  # Estratégia de atualização: garante zero downtime durante kubectl scale e
+  # atualizações de imagem. maxUnavailable: 0 assegura que não há redução de
+  # capacidade durante o processo; maxSurge: 1 permite criar um Pod extra
+  # temporariamente durante a transição.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  # Aguarda 5 segundos após o Pod passar na readinessProbe antes de considerá-lo
+  # "pronto para produção" e declarar o rollout/scale concluído.
+  minReadySeconds: 5
   selector:
     matchLabels:
       app: backend

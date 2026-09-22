@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import TaskList from './components/TaskList'
 import TaskForm from './components/TaskForm'
+import LoadBalancerTester from './components/LoadBalancerTester'
 
 function App() {
   const [tasks, setTasks] = useState([])
@@ -29,7 +30,7 @@ function App() {
 
   const fetchInfo = async () => {
     try {
-      const res = await fetch(`${API_URL}/info`)
+      const res = await fetch(`${API_URL}/info?t=${Date.now()}`)
       if (res.ok) {
         const data = await res.json()
         setAppInfo(data)
@@ -109,14 +110,27 @@ function App() {
 
   return (
     <div className="app-container">
-      {appInfo && (
-        <div className="app-info">
-          <span><strong>App:</strong> {appInfo.name}</span>
-          <span><strong>Host:</strong> {appInfo.hostname}</span>
+      {/* Banner de Identificação da Instância do Backend */}
+      <div className="backend-instance-banner">
+        <div className="banner-left">
+          <span className="live-indicator"></span>
+          <span className="banner-title">Backend atendendo através de:</span>
+          <code className="banner-hostname">{appInfo ? appInfo.hostname : 'Conectando ao backend...'}</code>
+          {appInfo?.ip && <span className="banner-ip">({appInfo.ip})</span>}
         </div>
-      )}
+        <button
+          className="btn-icon"
+          onClick={fetchInfo}
+          title="Consultar novamente /api/info para ver qual pod responde"
+        >
+          🔄 Atualizar
+        </button>
+      </div>
 
       <h1>Task Manager</h1>
+
+      {/* Ferramenta de Demonstração de Balanceamento de Carga */}
+      <LoadBalancerTester apiUrl={API_URL} onCompleted={fetchInfo} />
       
       {error && <div className="error-msg">{error}</div>}
       {successMsg && <div className="success-msg">{successMsg}</div>}

@@ -26,12 +26,12 @@ class InfoControllerTest {
     }
 
     @Test
-    void getInfo_shouldReturnInfoWithHostname() throws Exception {
+    void getInfo_shouldReturnInstanceIdentification() throws Exception {
         mockMvc.perform(get("/api/info"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.name").value("Task Manager REST API"))
-                .andExpect(jsonPath("$.version").value("1.0.0"))
-                .andExpect(jsonPath("$.description").value("Initial setup for Task Manager application"))
-                .andExpect(jsonPath("$.hostname").isNotEmpty());
+                .andExpect(jsonPath("$.application").value("task-manager"))
+                .andExpect(jsonPath("$.hostname").isNotEmpty())
+                .andExpect(jsonPath("$.ip").isNotEmpty())
+                .andExpect(jsonPath("$.timestamp").isNotEmpty());
     }
 }

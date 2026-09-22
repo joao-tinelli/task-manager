@@ -193,6 +193,127 @@ kubectl get secret taskmanager-secret
 
 ---
 
+## 📈 Demonstração de Escalabilidade, Balanceamento e Auto-Healing
+
+Esta seção detalha o roteiro para demonstrar visual e operacionalmente como o Kubernetes distribui carga e se autorrecupera de falhas.
+
+### Como Funciona o Balanceamento no Projeto
+1. **Endpoint de Identificação (`GET /api/info`)**:
+   Retorna a identificação dinâmica da réplica que atendeu à requisição (nome da aplicação, `hostname`, endereço IP interno e timestamp).
+2. **Interface do Frontend**:
+   * Exibe no topo o banner em tempo real: `Backend atendendo através de: <hostname>`.
+   * Inclui o painel interativo **"Testar balanceamento"**, que dispara requisições concorrentes ao backend e exibe a distribuição de respostas entre os diferentes Pods com cores, tempos e percentuais.
+3. **Mecanismo de Balanceamento**:
+   * O balanceamento é responsabilidade exclusiva do **Kubernetes Service** (`backend` na porta 8080).
+   * O `kube-proxy` atua na camada de transporte (L4) distribuindo as conexões de rede entre os Pods saudáveis registrados nos *Endpoints* do Service.
+
+---
+
+### Roteiro Prático de Demonstração (Passo a Passo)
+
+Abra o frontend no navegador: [http://localhost:30080](http://localhost:30080) (ou via `minikube service frontend`).
+
+> [!TIP]
+> O painel **"Testar balanceamento"** tem dois modos:
+> - **Concorrente** (padrão): dispara todas as requisições ao mesmo tempo, forçando múltiplas conexões TCP simultâneas no `kube-proxy`. Maximiza a distribuição entre Pods.
+> - **Sequencial** ☑️: dispara uma requisição por vez (com 100ms de intervalo). Ideal para apresentações ao vivo — os resultados aparecem linha a linha, tornando o round-robin claramente visível para a audiência.
+
+#### 1. Demonstração com 1 Réplica (Cenário Inicial)
+
+Defina o Deployment do backend com apenas 1 Pod:
+
+```bash
+kubectl scale deployment backend --replicas=1
+kubectl rollout status deployment/backend
+```
+
+* **No terminal:** Verifique que apenas 1 Pod está ativo:
+  ```bash
+  kubectl get pods -l app=backend
+  ```
+* **No Frontend:**
+  * Clique no botão **"Testar balanceamento"** (10 requisições).
+  * **Resultado esperado:** 100% das requisições são atendidas pela mesma réplica (`Requisição 1 → backend-xxxxx`, `Requisição 2 → backend-xxxxx`, ...).
+
+---
+
+#### 2. Demonstração com 3 Réplicas (Escalabilidade Horizontal)
+
+Escale o backend para 3 instâncias:
+
+```bash
+kubectl scale deployment backend --replicas=3
+kubectl rollout status deployment/backend
+```
+
+* **No terminal:** Observe os novos Pods sendo criados e passando pela probe de prontidão (*Readiness*):
+  ```bash
+  kubectl get pods -l app=backend -w
+  ```
+* **Verifique os Endpoints do Service:**
+  ```bash
+  kubectl get endpoints backend
+  ```
+  *(O Service registrará os 3 IPs correspondentes às novas réplicas ativas)*.
+* **No Frontend:**
+  * Clique no botão **"Testar balanceamento"**.
+  * **Resultado esperado:** As requisições são distribuídas entre os 3 Pods distintos (ex: réplica A ~30%, réplica B ~40%, réplica C ~30%), cada uma destacada com uma cor no painel.
+
+---
+
+#### 3. Demonstração com 5 Réplicas (Alta Escala)
+
+Escale o backend para 5 réplicas:
+
+```bash
+kubectl scale deployment backend --replicas=5
+kubectl rollout status deployment/backend
+```
+
+* **No terminal:**
+  ```bash
+  kubectl get pods -l app=backend -o wide
+  ```
+* **No Frontend:**
+  * Selecione a opção **"15 ou 20 requisições"** e clique em **"Testar balanceamento"**.
+  * **Resultado esperado:** O tráfego é espalhado entre as 5 réplicas ativas, comprovando a elasticidade horizontal do cluster sob demanda.
+
+---
+
+#### 4. Exclusão de um Pod (Simulação de Falha / Indisponibilidade)
+
+Simule um evento inesperado (como término forçado do processo) deletando um dos Pods em execução:
+
+1. Obtenha o nome de um dos Pods ativos:
+   ```bash
+   kubectl get pods -l app=backend
+   ```
+2. Delete o Pod selecionado:
+   ```bash
+   kubectl delete pod <nome-do-pod-selecionado>
+   ```
+
+---
+
+#### 5. Criação Automática de um Novo Pod (Resiliência e Auto-Healing)
+
+Imediatamente após o comando de exclusão, execute:
+
+```bash
+kubectl get pods -l app=backend -w
+```
+
+* **Comportamento observado:**
+  1. O Pod selecionado entra em estado `Terminating`.
+  2. O **ReplicaSet** do Deployment percebe instantaneamente que o estado atual (4 pods) difere do estado desejado declarado (`replicas: 5`).
+  3. O Kubernetes agenda e instancia **automaticamente** um novo Pod substituto com um novo identificador (ex: `backend-767868b4f8-yyyyy`).
+  4. O novo Pod executa a inicialização, passa na verificação de `readinessProbe` e é adicionado aos Endpoints do Service.
+* **No Frontend:**
+  * Clique em **"Testar balanceamento"** novamente.
+  * O novo hostname aparecerá na lista de respostas, demonstrando a recuperação transparente e sem indisponibilidade da aplicação.
+
+---
+
 ## 🛠️ Como Executar Localmente (Docker Compose)
 
 ### 1. Iniciar a aplicação
